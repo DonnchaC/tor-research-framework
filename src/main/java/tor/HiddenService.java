@@ -29,6 +29,7 @@ import org.bouncycastle.util.encoders.Base64;
 import tor.util.TorCircuitException;
 import tor.util.TorDocumentParser;
 
+import javax.management.Descriptor;
 import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
@@ -169,6 +170,99 @@ public class HiddenService {
 
         log.warn("Not found hs descriptor!");
         return null;
+    }
+
+    public static String getHSDescriptor(TorSocket sock, final String descriptor_id, final String fprint) throws IOException {
+        return HSDescriptorRequest(sock, descriptor_id, fprint, null);
+    }
+
+    public static String postHSDescriptor(TorSocket sock, final String descriptor, final String fprint) throws IOException {
+        return HSDescriptorRequest(sock, null, fprint, descriptor);
+    }
+
+    public static String HSDescriptorRequest(TorSocket sock, final String descriptor_id, final String fprint, final String descriptor) throws IOException {
+        // Send GET and POST requests to specified HSDir.
+
+        Consensus con = Consensus.getConsensus();
+        OnionRouter or = null;
+        // Try get the requested OR from the consensus
+        if (con.routers.containsKey(fprint)){
+            or = con.routers.get(fprint);
+        } else {
+            log.error("Could not find the request HSDir in the consensus");
+            throw new IOException("Could not find the requested HSDir in the consensus. Check the fingerprint is correct");
+        }
+
+        log.debug("Trying Directory Server: {}", or);
+
+        // establish circuit to responsible directory
+        TorCircuit circ = sock.createCircuit(true);
+        try {
+            circ.create();
+            circ.extend(or);
+        } catch(TorCircuitException e) {
+            throw new IOException("HS Fetch failed due to circuit failure, you should retry.");
+        }
+
+        // asynchronous call
+        TorStream st = circ.createDirStream(new TorStream.TorStreamListener() {
+            @Override
+            public void dataArrived(TorStream s) {
+            }
+
+            @Override
+            public void connected(TorStream s) {
+                try {
+                    if(descriptor != null && !descriptor.isEmpty()) {
+                        s.sendHTTPPOSTRequest("/tor/rendezvous2/publish", "dirreq", descriptor);
+                    } else {
+                        s.sendHTTPGETRequest("/tor/rendezvous2/" + descriptor_id, "dirreq");
+                    }
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+
+            @Override
+            public void disconnected(TorStream s) {
+                synchronized (fprint) {
+                    fprint.notify();
+                }
+            }
+
+            @Override
+            public void failure(TorStream s) {
+                synchronized (fprint) {
+                    fprint.notify();
+                }
+            }
+        });
+
+        // wait for notification from the above listener that data is here! (that remote side ended connection - data could be blank
+        synchronized (fprint) {
+            try {
+                fprint.wait(1000);
+                if(circ.state== TorCircuit.STATES.DESTROYED) {
+                    System.out.println("HS - Desc Fetch - Circuit Destroyed");
+                    throw new TorCircuitException("circuit destroyed");
+                }
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+                throw new IOException("Circuit failed");
+            }
+        }
+
+        // get HTTP response and body
+        String data = IOUtils.toString(st.getInputStream());
+        circ.destroy();
+
+        // HTTP success code
+        if (data.length() < 1 || !data.split(" ")[1].equals("200")) {
+            throw new IOException("HTTPError: "+ data); // Throw the error
+        }
+
+        int dataIndex = data.indexOf("\r\n\r\n");
+        return data.substring(dataIndex);
     }
 
     public static void sendIntroduce(TorSocket sock, String onion, TorCircuit rendz) throws IOException {

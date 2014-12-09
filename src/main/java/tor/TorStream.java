@@ -73,6 +73,10 @@ public class TorStream {
         send(("GET " + url + " HTTP/1.1\r\nHost: " + host + "\r\n\r\n").getBytes());
     }
 
+    public void sendHTTPPOSTRequest(String url, String host, String body) throws IOException {
+        send(("POST " + url + " HTTP/1.1\r\nHost: " + host + "\r\nContent-Length: " + body.length() + "\r\n\r\n" + body).getBytes());
+    }
+
     public void waitForState(STATES desired) throws IOException {
         while (true) {
             synchronized (this) {
