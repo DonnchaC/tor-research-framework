@@ -173,10 +173,12 @@ public class HiddenService {
     }
 
     public static String getHSDescriptor(TorSocket sock, final String descriptor_id, final String fprint) throws IOException {
+        log.debug("Requesting descriptor '{}' from HSDir '{}'", descriptor_id, fprint);
         return HSDescriptorRequest(sock, descriptor_id, fprint, null);
     }
 
     public static String postHSDescriptor(TorSocket sock, final String descriptor, final String fprint) throws IOException {
+        log.debug("Uploading descriptor of length '{}' to HSDir '{}'", descriptor.length(), fprint);
         return HSDescriptorRequest(sock, null, fprint, descriptor);
     }
 
